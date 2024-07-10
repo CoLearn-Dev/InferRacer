@@ -1,0 +1,4 @@
+__pycache__/
+tmp/
+.mypy_cache/
+.vscode/
