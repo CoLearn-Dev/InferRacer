@@ -14,12 +14,12 @@ class Client:
 
         requests.post(
             f"{url}/user/signin",
-            data={"username": "admin", "password": "admin"},
+            data={"username": username, "password": password},
         )
 
         token = requests.post(
             f"{url}/user/login",
-            data={"username": "admin", "password": "admin"},
+            data={"username": username, "password": password},
         ).json()["token"]
         self.header = {"Authorization": f"Bearer {token}"}
 
