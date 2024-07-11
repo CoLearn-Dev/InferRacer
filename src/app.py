@@ -8,7 +8,7 @@ from openai import BaseModel
 
 from .workload.workload import ChatCompletion
 from .workload.oasst1 import Oasst1Dataset
-from .run import ResponseChunk, Run, Summary
+from .run import RequestChunk, ResponseChunk, Run, Summary
 
 app = FastAPI()
 key = "secret"
@@ -83,7 +83,7 @@ async def create_run(request: CreateRunRequest, user=Depends(authenticate)):
     return {"run_id": run_id}
 
 
-@app.get("/run/lt/{run_id}/batch", response_model=list[ChatCompletion])
+@app.get("/run/lt/{run_id}/batch", response_model=RequestChunk)
 def get_batch(
     run_id: str, offset: int, limit: int, sorted: bool, user=Depends(authenticate)
 ):

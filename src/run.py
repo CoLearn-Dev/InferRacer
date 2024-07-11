@@ -50,6 +50,15 @@ class BufferedResponses(BaseModel):
         return list(map(lambda x: (x.buffer, x.time_last_added), self.content))
 
 
+class RequestEntry(BaseModel):
+    request_id: int
+    payload: ChatCompletion
+
+
+class RequestChunk(BaseModel):
+    entries: list[RequestEntry]
+
+
 class ResponseEntry(BaseModel):
     request_id: int
     offset: int
@@ -103,8 +112,9 @@ class Run:
         self.num_post_total = 0
         self.time_first_get: Optional[datetime.datetime] = None
         self.trace_num_token: list[int] = []
+        self.pointer = 0
 
-    def get_workload(self, offset: int, limit: int) -> Optional[list[ChatCompletion]]:
+    def get_workload(self, offset: int, limit: int) -> Optional[RequestChunk]:
         now = datetime.datetime.utcnow()
         if now - self.time_started > datetime.timedelta(seconds=self.time_limit):
             return None
@@ -113,7 +123,17 @@ class Run:
             self.time_first_get = now
         self.time_last_get = now
         self.num_get_total += 1
-        return self.workload.completions[offset : offset + limit]
+
+        entries = []
+        if offset == -1:
+            offset = self.pointer
+        for completion, index in zip(
+            self.workload.completions[offset : offset + limit],
+            range(offset, offset + limit),
+        ):
+            entries.append(RequestEntry(request_id=index, payload=completion))
+        self.pointer = max(self.pointer, offset + limit)
+        return RequestChunk(entries=entries)
 
     def add_result(
         self,

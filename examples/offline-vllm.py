@@ -5,7 +5,6 @@ import json
 from transformers import AutoTokenizer
 import os
 from concurrent.futures import ThreadPoolExecutor
-import time
 
 
 class Client:
@@ -27,7 +26,9 @@ class Client:
         ).json()["token"]
         self.header = {"Authorization": f"Bearer {token}"}
 
-    def recv_prompts(self, run_id: int, offset: int, limit: int) -> Optional[dict]:
+    def recv_prompts(
+        self, run_id: int, offset: int, limit: int
+    ) -> Optional[list[dict]]:
         reply = requests.get(
             f"{self.url}/run/lt/{run_id}/batch",
             headers=self.header,
@@ -35,7 +36,7 @@ class Client:
         )
         if reply.status_code != 200:
             return None
-        return reply.json()
+        return reply.json()["entries"]
 
     def send_responses(self, run_id: int, entries: list[dict]) -> bool:
         reply = requests.post(
@@ -70,7 +71,9 @@ class Client:
             prompts = []
             for completion in completions:
                 formatted_prompt = tokenizer.apply_chat_template(
-                    completion["messages"], tokenize=False, add_generation_prompt=True
+                    completion["payload"]["messages"],
+                    tokenize=False,
+                    add_generation_prompt=True,
                 )
                 prompts.append(formatted_prompt)
             future = self.executor.submit(llm.generate, prompts)
