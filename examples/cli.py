@@ -1,8 +1,11 @@
+from typing import Optional
 from vllm import LLM
 import requests
 import json
 from transformers import AutoTokenizer
 import os
+from concurrent.futures import ThreadPoolExecutor
+import time
 
 
 class Client:
@@ -11,6 +14,7 @@ class Client:
         self.password = password
         self.url = url
         self.batchsize = batchsize
+        self.executor = ThreadPoolExecutor(max_workers=16)
 
         requests.post(
             f"{url}/user/signin",
@@ -23,6 +27,26 @@ class Client:
         ).json()["token"]
         self.header = {"Authorization": f"Bearer {token}"}
 
+    def recv_prompts(self, run_id: int, offset: int, limit: int) -> Optional[dict]:
+        reply = requests.get(
+            f"{self.url}/run/lt/{run_id}/batch",
+            headers=self.header,
+            params={"offset": offset, "limit": limit, "sorted": False},
+        )
+        if reply.status_code != 200:
+            return None
+        return reply.json()
+
+    def send_responses(self, run_id: int, entries: list[dict]) -> bool:
+        reply = requests.post(
+            f"{self.url}/run/lt/{run_id}",
+            headers=self.header,
+            json={
+                "entries": entries,
+            },
+        )
+        return reply.status_code == 200
+
     def speedtest(self, llm: LLM):
         tokenizer = AutoTokenizer.from_pretrained("meta-llama/Meta-Llama-3-8B-Instruct")
         reply = requests.post(
@@ -33,23 +57,24 @@ class Client:
         run_id = reply.json()["run_id"]
 
         index = 0
+        prefetch_future = self.executor.submit(
+            self.recv_prompts, run_id, 0, self.batchsize
+        )
         while True:
-            reply = requests.get(
-                f"{self.url}/run/lt/{run_id}/batch",
-                headers=self.header,
-                params={"offset": index, "limit": self.batchsize, "sorted": False},
-            )
-            if reply.status_code != 200:
+            completions = prefetch_future.result()
+            if completions is None:
                 break
-
-            completions = reply.json()
+            prefetch_future = self.executor.submit(
+                self.recv_prompts, run_id, index + self.batchsize, self.batchsize
+            )
             prompts = []
             for completion in completions:
                 formatted_prompt = tokenizer.apply_chat_template(
                     completion["messages"], tokenize=False, add_generation_prompt=True
                 )
                 prompts.append(formatted_prompt)
-            outputs = llm.generate(prompts)
+            future = self.executor.submit(llm.generate, prompts)
+            outputs = future.result()
             results = [output.outputs[0].text for output in outputs]
             entries = []
             for result in results:
@@ -62,15 +87,7 @@ class Client:
                     }
                 )
                 index += 1
-            reply = requests.post(
-                f"{self.url}/run/lt/{run_id}",
-                headers=self.header,
-                json={
-                    "entries": entries,
-                },
-            )
-            if reply.status_code != 200:
-                break
+            self.executor.submit(self.send_responses, run_id, entries)
 
         reply = requests.get(f"{self.url}/run/lt/{run_id}/summary", headers=self.header)
         print(json.dumps(reply.json()))
