@@ -33,7 +33,6 @@ class Client:
         run_id = reply.json()["run_id"]
 
         index = 0
-        chunk_id = 0
         while True:
             reply = requests.get(
                 f"{self.url}/run/lt/{run_id}/batch",
@@ -52,21 +51,26 @@ class Client:
                 prompts.append(formatted_prompt)
             outputs = llm.generate(prompts)
             results = [output.outputs[0].text for output in outputs]
+            entries = []
+            for result in results:
+                entries.append(
+                    {
+                        "request_id": index,
+                        "offset": 0,
+                        "payload": result,
+                        "finished": False,
+                    }
+                )
+                index += 1
             reply = requests.post(
                 f"{self.url}/run/lt/{run_id}",
                 headers=self.header,
                 json={
-                    "offset": index,
-                    "chunk_id": chunk_id,
-                    "data": results,
-                    "finished": False,
+                    "entries": entries,
                 },
             )
             if reply.status_code != 200:
                 break
-
-            index += self.batchsize
-            chunk_id += 1
 
         reply = requests.get(f"{self.url}/run/lt/{run_id}/summary", headers=self.header)
         print(json.dumps(reply.json()))

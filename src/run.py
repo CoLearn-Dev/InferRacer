@@ -13,10 +13,52 @@ llama3_tokenizer = AutoTokenizer.from_pretrained("meta-llama/Meta-Llama-3-70B")
 openai_tokenizer = tiktoken.encoding_for_model("gpt-3.5-turbo")
 
 
+class BufferedString(BaseModel):
+    buffer: str = ""
+    time_last_added: Optional[datetime.datetime] = None
+    finished: bool = False
+
+    def insert(
+        self, offset: int, payload: str, time: datetime.datetime, finished: bool
+    ):
+        self.time_last_added = time
+        self.finished = finished
+        if offset <= len(self.buffer):
+            self.buffer = self.buffer[:offset] + payload
+        else:
+            self.buffer = self.buffer + " " * (offset - len(self.buffer)) + payload
+
+
+class BufferedResponses(BaseModel):
+    content: list[BufferedString] = []
+
+    def insert(
+        self,
+        index: int,
+        offset: int,
+        payload: str,
+        time: datetime.datetime,
+        finished: bool,
+    ):
+        while index >= len(self.content):
+            self.content.append(BufferedString())
+        self.content[index].insert(offset, payload, time, finished)
+
+    def into_timestamped_responses(
+        self,
+    ) -> list[tuple[str, Optional[datetime.datetime]]]:
+        return list(map(lambda x: (x.buffer, x.time_last_added), self.content))
+
+
+class ResponseEntry(BaseModel):
+    request_id: int
+    offset: int
+    payload: str
+    finished: bool
+
+
 class ResponseChunk(BaseModel):
-    chunk_id: int
-    payload: list[str]
-    time_arrived: datetime.datetime
+    entries: list[ResponseEntry]
 
 
 class Summary(BaseModel):
@@ -30,8 +72,8 @@ class Summary(BaseModel):
     num_task_touched: int
     first_get_time: Optional[datetime.datetime]
     last_post_time: Optional[datetime.datetime]
-    sample_requests_first_3: list[tuple[ChatCompletion, tuple[str, datetime.datetime]]]
-    sample_requests_last_3: list[tuple[ChatCompletion, tuple[str, datetime.datetime]]]
+    sample_requests_first_3: list[tuple[ChatCompletion, BufferedString]]
+    sample_requests_last_3: list[tuple[ChatCompletion, BufferedString]]
     trace_num_token: list[int]
 
 
@@ -54,7 +96,7 @@ class Run:
         self.username = username
         self.rule = rule
         self.workload = workload
-        self.responses: list[ResponseChunk] = []
+        self.responses = BufferedResponses()
         self.time_started = datetime.datetime.utcnow()
         self.time_limit = time_limit
         self.num_get_total = 0
@@ -74,7 +116,8 @@ class Run:
         return self.workload.completions[offset : offset + limit]
 
     def add_result(
-        self, chunk_id: int, offset: int, data: list[str], finished: bool
+        self,
+        response: ResponseChunk,
     ) -> bool:
         now = datetime.datetime.utcnow()
         if now - self.time_started > datetime.timedelta(seconds=self.time_limit):
@@ -82,38 +125,19 @@ class Run:
 
         self.num_post_total += 1
 
-        if finished:
-            self.time_consumed = now - self.time_started
-            return True
-
-        flag = False
-        for index, response in enumerate(self.responses):
-            if response.chunk_id > chunk_id:
-                self.responses.insert(
-                    index,
-                    ResponseChunk(chunk_id=chunk_id, payload=data, time_arrived=now),
-                )
-                flag = True
-        if not flag:
-            self.responses.append(
-                ResponseChunk(chunk_id=chunk_id, payload=data, time_arrived=now)
+        for entry in response.entries:
+            self.responses.insert(
+                entry.request_id, entry.offset, entry.payload, now, False
             )
 
         return True
-
-    def get_timestamped_response(self) -> list[tuple[str, datetime.datetime]]:
-        responses = []
-        for chunk in self.responses:
-            for entry in chunk.payload:
-                responses.append((entry, chunk.time_arrived))
-        return responses
 
     def calculate_trace(self):
         trace = []
         responses = list(
             map(
-                lambda x: (count_openai_token(x[0]), x[1]),
-                self.get_timestamped_response(),
+                lambda x: (count_openai_token(x.buffer), x.time_last_added),
+                filter(lambda x: x.time_last_added is not None, self.responses.content),
             )
         )
 
@@ -125,7 +149,7 @@ class Run:
                 map(
                     lambda x: x[0],
                     filter(
-                        lambda x: x[1] - time_first_get
+                        lambda x: x[1] - time_first_get  # type: ignore
                         <= datetime.timedelta(seconds=i),
                         responses,
                     ),
@@ -135,18 +159,17 @@ class Run:
         return trace
 
     def sumup(self) -> Summary:
-        if len(self.responses) > 0:
-            last_post_time = self.responses[-1].time_arrived
-        responses = self.get_timestamped_response()
+        if len(self.responses.content) > 0:
+            last_post_time = self.responses.content[-1].time_last_added
 
         return Summary(
             rule=self.rule,
             username=self.username,
             num_token_total_llama3=sum(
-                count_llama3_token(entry[0]) for entry in responses
+                count_llama3_token(entry.buffer) for entry in self.responses.content
             ),
             num_token_total_openai=sum(
-                count_openai_token(entry[0]) for entry in responses
+                count_openai_token(entry.buffer) for entry in self.responses.content
             ),
             num_get_total=self.num_get_total,
             num_post_total=self.num_post_total,
@@ -155,10 +178,10 @@ class Run:
             first_get_time=self.time_first_get,
             last_post_time=last_post_time,
             sample_requests_first_3=list(
-                zip(self.workload.completions[:3], responses[:3])
+                zip(self.workload.completions[:3], self.responses.content[:3])
             ),
             sample_requests_last_3=list(
-                zip(self.workload.completions[-3:], responses[-3:])
+                zip(self.workload.completions[-3:], self.responses.content[-3:])
             ),
             trace_num_token=self.calculate_trace(),
         )

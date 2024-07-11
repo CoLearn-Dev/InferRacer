@@ -8,7 +8,7 @@ from openai import BaseModel
 
 from .workload.workload import ChatCompletion
 from .workload.oasst1 import Oasst1Dataset
-from .run import Run, Summary
+from .run import ResponseChunk, Run, Summary
 
 app = FastAPI()
 key = "secret"
@@ -102,16 +102,14 @@ def get_batch(
 @app.post("/run/lt/{run_id}")
 def submit_results(
     run_id: str,
-    request: SubmitResultsRequest,
+    chunk: ResponseChunk,
     user=Depends(authenticate),
 ):
     if run_id not in runs or run_id not in user2run[user]:
         raise HTTPException(status_code=404, detail="Run not found")
 
     run = runs[run_id]
-    if not run.add_result(
-        request.chunk_id, request.offset, request.data, request.finished
-    ):
+    if not run.add_result(chunk):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Time limit exceeded"
         )
