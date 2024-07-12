@@ -23,7 +23,9 @@ class BufferedString(BaseModel):
     ):
         self.time_last_added = time
         self.finished = finished
-        if offset <= len(self.buffer):
+        if offset == -1:
+            self.buffer = self.buffer + payload
+        elif offset <= len(self.buffer):
             self.buffer = self.buffer[:offset] + payload
         else:
             self.buffer = self.buffer + " " * (offset - len(self.buffer)) + payload
@@ -137,7 +139,7 @@ class Run:
 
     def add_result(
         self,
-        response: ResponseChunk,
+        responses: list[ResponseEntry],
     ) -> bool:
         now = datetime.datetime.utcnow()
         if now - self.time_started > datetime.timedelta(seconds=self.time_limit):
@@ -145,7 +147,7 @@ class Run:
 
         self.num_post_total += 1
 
-        for entry in response.entries:
+        for entry in responses:
             self.responses.insert(
                 entry.request_id, entry.offset, entry.payload, now, False
             )
@@ -181,6 +183,8 @@ class Run:
     def sumup(self) -> Summary:
         if len(self.responses.content) > 0:
             last_post_time = self.responses.content[-1].time_last_added
+        else: 
+            last_post_time = None
 
         return Summary(
             rule=self.rule,

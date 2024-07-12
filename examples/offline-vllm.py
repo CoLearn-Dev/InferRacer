@@ -30,7 +30,7 @@ class Client:
         self, run_id: int, offset: int, limit: int
     ) -> Optional[list[dict]]:
         reply = requests.get(
-            f"{self.url}/run/lt/{run_id}/batch",
+            f"{self.url}/run/lt/{run_id}/fetch",
             headers=self.header,
             params={"offset": offset, "limit": limit, "sorted": False},
         )
@@ -40,11 +40,9 @@ class Client:
 
     def send_responses(self, run_id: int, entries: list[dict]) -> bool:
         reply = requests.post(
-            f"{self.url}/run/lt/{run_id}",
+            f"{self.url}/run/lt/{run_id}/submit",
             headers=self.header,
-            json={
-                "entries": entries,
-            },
+            json=entries,
         )
         return reply.status_code == 200
 

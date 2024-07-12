@@ -1,14 +1,15 @@
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, status, Request
+from fastapi.responses import StreamingResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from typing import Optional
 import datetime
 import uuid
 import jwt
+import json
 from openai import BaseModel
 
-from .workload.workload import ChatCompletion
 from .workload.oasst1 import Oasst1Dataset
-from .run import RequestChunk, ResponseChunk, Run, Summary
+from .run import RequestChunk, ResponseChunk, ResponseEntry, Run, Summary
 
 app = FastAPI()
 key = "secret"
@@ -83,7 +84,7 @@ async def create_run(request: CreateRunRequest, user=Depends(authenticate)):
     return {"run_id": run_id}
 
 
-@app.get("/run/lt/{run_id}/batch", response_model=RequestChunk)
+@app.get("/run/lt/{run_id}/fetch", response_model=RequestChunk)
 def get_batch(
     run_id: str, offset: int, limit: int, sorted: bool, user=Depends(authenticate)
 ):
@@ -99,17 +100,47 @@ def get_batch(
     return completions
 
 
-@app.post("/run/lt/{run_id}")
-def submit_results(
+async def process_responses(run: Run, request: Request):
+    async for bs in request.stream():
+        if bs == b"":
+            break
+        for raw in bs.decode("utf-8").split("\n"):
+            if raw == "":
+                continue
+            data = json.loads(raw)
+            entries = [ResponseEntry(**item) for item in data]
+            if not run.add_result(entries):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Time limit exceeded",
+                )
+
+
+@app.post("/run/lt/{run_id}/push")
+async def push_results(
     run_id: str,
-    chunk: ResponseChunk,
+    request: Request,
     user=Depends(authenticate),
 ):
     if run_id not in runs or run_id not in user2run[user]:
         raise HTTPException(status_code=404, detail="Run not found")
 
     run = runs[run_id]
-    if not run.add_result(chunk):
+    await process_responses(run, request)
+    return {"message": "ok"}
+
+
+@app.post("/run/lt/{run_id}/submit")
+def submit_results(
+    run_id: str,
+    entries: list[ResponseEntry],
+    user=Depends(authenticate),
+):
+    if run_id not in runs or run_id not in user2run[user]:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    run = runs[run_id]
+    if not run.add_result(entries):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Time limit exceeded"
         )
