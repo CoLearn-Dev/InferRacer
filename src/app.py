@@ -8,16 +8,16 @@ import jwt
 import json
 from openai import BaseModel
 
-from .competition import Competition, RankingSlot
+from .competition import LimitedTimeCompetition, RankingSlot
 
 from .workload.oasst1 import Oasst1Dataset
-from .run import RequestEntry, ResponseEntry, Run, Summary
+from .run import RequestEntry, ResponseEntry, LimitedTimeRun, Summary
 
 app = FastAPI()
 key = "secret"
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 users: dict[str, str] = {}
-competition = Competition(Oasst1Dataset().into_workload())
+competition = LimitedTimeCompetition(Oasst1Dataset().into_workload())
 
 
 class CreateRunRequest(BaseModel):
@@ -95,7 +95,7 @@ def get_batch(
     return completions
 
 
-async def process_responses(run: Run, request: Request):
+async def process_responses(run: LimitedTimeRun, request: Request):
     async for bs in request.stream():
         if bs == b"":
             break

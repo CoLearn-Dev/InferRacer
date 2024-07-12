@@ -1,3 +1,4 @@
+from abc import ABC, abstractmethod
 import time
 from typing import Optional
 import datetime
@@ -88,65 +89,57 @@ def count_llama3_token(text: str) -> int:
     return len(llama3_tokenizer.tokenize(text))
 
 
-class Run:
-    """
-    Currently, the timer goes when the struct is created.
-    """
-
-    def __init__(
-        self, username: str, rule: str, workload: Workload, time_limit: int = 60
-    ):
+class BasicRun(ABC):
+    def __init__(self, username: str, workload: Workload):
         self.username = username
-        self.rule = rule
         self.workload = workload
         self.responses = BufferedResponses()
-        self.time_started = datetime.datetime.utcnow()
-        self.time_limit = time_limit
         self.num_get_total = 0
-        self.num_post_total = 0
-        self.time_first_get: Optional[datetime.datetime] = None
-        self.trace_num_token: list[int] = []
-        self.pointer = 0
+        self.num_post_total = 0  # meaningless when using streaming?
+        self.workload_index = 0
+        self.time_started = datetime.datetime.utcnow()
+
+    @abstractmethod
+    def check_limitation(self) -> bool:
+        pass
 
     def get_workload(self, offset: int, limit: int) -> Optional[list[RequestEntry]]:
-        now = datetime.datetime.utcnow()
-        if now - self.time_started > datetime.timedelta(seconds=self.time_limit):
+        if not self.check_limitation():
             return None
-        now = datetime.datetime.utcnow()
-        if self.num_get_total == 0:
-            self.time_first_get = now
-        self.time_last_get = now
+
         self.num_get_total += 1
 
         entries = []
         if offset == -1:
-            offset = self.pointer
+            offset = self.workload_index
         for completion, index in zip(
             self.workload.completions[offset : offset + limit],
             range(offset, offset + limit),
         ):
             entries.append(RequestEntry(request_id=index, payload=completion))
-        self.pointer = max(self.pointer, offset + limit)
+        self.workload_index = max(self.workload_index, offset + limit)
         return entries
 
     def add_result(
         self,
         responses: list[ResponseEntry],
     ) -> bool:
-        now = datetime.datetime.utcnow()
-        if now - self.time_started > datetime.timedelta(seconds=self.time_limit):
+        if not self.check_limitation():
             return False
 
         self.num_post_total += 1
-
+        now = datetime.datetime.utcnow()
         for entry in responses:
             self.responses.insert(
-                entry.request_id, entry.offset, entry.payload, now, False
+                entry.request_id, entry.offset, entry.payload, now, entry.finished
             )
 
         return True
 
-    def calculate_trace(self):
+    def count_total_openai_tokens(self):
+        return sum(count_openai_token(entry.buffer) for entry in self.responses.content)
+
+    def calculate_trace(self, time_range: int):
         trace = []
         responses = list(
             map(
@@ -155,10 +148,9 @@ class Run:
             )
         )
 
-        time_first_get = self.time_first_get
-        assert time_first_get is not None
+        time_first_get = self.time_started
 
-        for i in range(1, self.time_limit + 1):
+        for i in range(1, time_range + 1):
             satisfied_num = sum(
                 map(
                     lambda x: x[0],
@@ -172,8 +164,22 @@ class Run:
             trace.append(satisfied_num)
         return trace
 
-    def count_total_openai_tokens(self):
-        return sum(count_openai_token(entry.buffer) for entry in self.responses.content)
+
+class LimitedTimeRun(BasicRun):
+    """
+    Currently, the timer goes when the struct is created.
+    """
+
+    def __init__(
+        self, username: str, rule: str, workload: Workload, time_limit: int = 60
+    ):
+        super().__init__(username, workload)
+        self.rule = rule
+        self.time_limit = time_limit
+
+    def check_limitation(self) -> bool:
+        now = datetime.datetime.utcnow()
+        return now - self.time_started <= datetime.timedelta(seconds=self.time_limit)
 
     def sumup(self) -> Summary:
         if len(self.responses.content) > 0:
@@ -192,7 +198,7 @@ class Run:
             num_post_total=self.num_post_total,
             num_task_finished=self.num_post_total,
             num_task_touched=self.num_get_total,
-            first_get_time=self.time_first_get,
+            first_get_time=self.time_started,
             last_post_time=last_post_time,
             sample_requests_first_3=list(
                 zip(self.workload.completions[:3], self.responses.content[:3])
@@ -200,5 +206,5 @@ class Run:
             sample_requests_last_3=list(
                 zip(self.workload.completions[-3:], self.responses.content[-3:])
             ),
-            trace_num_token=self.calculate_trace(),
+            trace_num_token=self.calculate_trace(self.time_limit),
         )

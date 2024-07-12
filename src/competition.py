@@ -1,6 +1,6 @@
 from typing import Optional
 from openai import BaseModel
-from .run import Run
+from .run import LimitedTimeRun
 from .workload.workload import Workload
 
 
@@ -11,15 +11,15 @@ class RankingSlot(BaseModel):
     username: str
 
 
-class Competition:
+class LimitedTimeCompetition:
     def __init__(self, workload: Workload, time_limit: int = 60):
         self.workload = workload
         self.time_limit = time_limit
         self.user2run: dict[str, set[str]] = {}
-        self.runs: dict[str, Run] = {}
+        self.runs: dict[str, LimitedTimeRun] = {}
 
-    def create_run(self, username: str, run_id: str, rule: str) -> Run:
-        run = Run(username, rule, self.workload)
+    def create_run(self, username: str, run_id: str, rule: str) -> LimitedTimeRun:
+        run = LimitedTimeRun(username, rule, self.workload)
         if username not in self.user2run:
             self.user2run[username] = set()
         self.user2run[username].add(run_id)
