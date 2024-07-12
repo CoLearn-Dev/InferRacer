@@ -8,15 +8,16 @@ import jwt
 import json
 from openai import BaseModel
 
+from .competition import Competition, RankingSlot
+
 from .workload.oasst1 import Oasst1Dataset
-from .run import RequestChunk, ResponseChunk, ResponseEntry, Run, Summary
+from .run import RequestEntry, ResponseEntry, Run, Summary
 
 app = FastAPI()
 key = "secret"
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 users: dict[str, str] = {}
-user2run: dict[str, set[str]] = {}
-runs: dict[str, Run] = {}
+competition = Competition(Oasst1Dataset().into_workload())
 
 
 class CreateRunRequest(BaseModel):
@@ -36,7 +37,6 @@ def signin(form: OAuth2PasswordRequestForm = Depends()):
     if form.username in users:
         raise HTTPException(status_code=400, detail="User already exists")
     users[form.username] = form.password
-    user2run[form.username] = set()
     return {"username": form.username}
 
 
@@ -75,23 +75,18 @@ def authenticate(token: str = Depends(oauth2_scheme)) -> str:
 @app.post("/run/lt")
 async def create_run(request: CreateRunRequest, user=Depends(authenticate)):
     run_id = str(uuid.uuid4())
-    user2run[user].add(run_id)
-    runs[run_id] = Run(
-        username=user,
-        rule=request.rule,
-        workload=Oasst1Dataset().into_workload(),
-    )
+    competition.create_run(user, run_id, request.rule)
     return {"run_id": run_id}
 
 
-@app.get("/run/lt/{run_id}/fetch", response_model=RequestChunk)
+@app.get("/run/lt/{run_id}/fetch", response_model=list[RequestEntry])
 def get_batch(
     run_id: str, offset: int, limit: int, sorted: bool, user=Depends(authenticate)
 ):
-    if run_id not in runs or run_id not in user2run[user]:
+    if run_id not in competition.runs or run_id not in competition.user2run[user]:
         raise HTTPException(status_code=404, detail="Run not found")
 
-    run = runs[run_id]
+    run = competition.runs[run_id]
     completions = run.get_workload(offset, limit)
     if completions is None:
         raise HTTPException(
@@ -122,10 +117,10 @@ async def push_results(
     request: Request,
     user=Depends(authenticate),
 ):
-    if run_id not in runs or run_id not in user2run[user]:
+    if run_id not in competition.runs or run_id not in competition.user2run[user]:
         raise HTTPException(status_code=404, detail="Run not found")
 
-    run = runs[run_id]
+    run = competition.runs[run_id]
     await process_responses(run, request)
     return {"message": "ok"}
 
@@ -136,10 +131,10 @@ def submit_results(
     entries: list[ResponseEntry],
     user=Depends(authenticate),
 ):
-    if run_id not in runs or run_id not in user2run[user]:
+    if run_id not in competition.runs or run_id not in competition.user2run[user]:
         raise HTTPException(status_code=404, detail="Run not found")
 
-    run = runs[run_id]
+    run = competition.runs[run_id]
     if not run.add_result(entries):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Time limit exceeded"
@@ -149,11 +144,16 @@ def submit_results(
 
 @app.get("/run/lt/{run_id}/summary", response_model=Summary)
 def get_summary(run_id: str, user=Depends(authenticate)):
-    if run_id not in runs or run_id not in user2run[user]:
+    if run_id not in competition.runs or run_id not in competition.user2run[user]:
         raise HTTPException(status_code=404, detail="Run not found")
 
-    run = runs[run_id]
+    run = competition.runs[run_id]
     return run.sumup()
+
+
+@app.get("/run/lt/leaderboard", response_model=list[RankingSlot])
+def get_leaderboard(_=Depends(authenticate)):
+    return competition.get_leaderboard()
 
 
 if __name__ == "__main__":

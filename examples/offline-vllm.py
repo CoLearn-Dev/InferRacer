@@ -36,7 +36,7 @@ class Client:
         )
         if reply.status_code != 200:
             return None
-        return reply.json()["entries"]
+        return reply.json()
 
     def send_responses(self, run_id: int, entries: list[dict]) -> bool:
         reply = requests.post(
@@ -91,6 +91,8 @@ class Client:
             self.executor.submit(self.send_responses, run_id, entries)
 
         reply = requests.get(f"{self.url}/run/lt/{run_id}/summary", headers=self.header)
+        print(json.dumps(reply.json()))
+        reply = requests.get(f"{self.url}/run/lt/leaderboard", headers=self.header)
         print(json.dumps(reply.json()))
 
 

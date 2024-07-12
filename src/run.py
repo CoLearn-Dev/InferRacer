@@ -57,19 +57,11 @@ class RequestEntry(BaseModel):
     payload: ChatCompletion
 
 
-class RequestChunk(BaseModel):
-    entries: list[RequestEntry]
-
-
 class ResponseEntry(BaseModel):
     request_id: int
     offset: int
     payload: str
     finished: bool
-
-
-class ResponseChunk(BaseModel):
-    entries: list[ResponseEntry]
 
 
 class Summary(BaseModel):
@@ -116,7 +108,7 @@ class Run:
         self.trace_num_token: list[int] = []
         self.pointer = 0
 
-    def get_workload(self, offset: int, limit: int) -> Optional[RequestChunk]:
+    def get_workload(self, offset: int, limit: int) -> Optional[list[RequestEntry]]:
         now = datetime.datetime.utcnow()
         if now - self.time_started > datetime.timedelta(seconds=self.time_limit):
             return None
@@ -135,7 +127,7 @@ class Run:
         ):
             entries.append(RequestEntry(request_id=index, payload=completion))
         self.pointer = max(self.pointer, offset + limit)
-        return RequestChunk(entries=entries)
+        return entries
 
     def add_result(
         self,
@@ -180,10 +172,13 @@ class Run:
             trace.append(satisfied_num)
         return trace
 
+    def count_total_openai_tokens(self):
+        return sum(count_openai_token(entry.buffer) for entry in self.responses.content)
+
     def sumup(self) -> Summary:
         if len(self.responses.content) > 0:
             last_post_time = self.responses.content[-1].time_last_added
-        else: 
+        else:
             last_post_time = None
 
         return Summary(
@@ -192,9 +187,7 @@ class Run:
             num_token_total_llama3=sum(
                 count_llama3_token(entry.buffer) for entry in self.responses.content
             ),
-            num_token_total_openai=sum(
-                count_openai_token(entry.buffer) for entry in self.responses.content
-            ),
+            num_token_total_openai=self.count_total_openai_tokens(),
             num_get_total=self.num_get_total,
             num_post_total=self.num_post_total,
             num_task_finished=self.num_post_total,

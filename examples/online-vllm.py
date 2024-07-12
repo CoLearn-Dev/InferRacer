@@ -133,8 +133,8 @@ class Client:
             prefetch_future = self.network_executor.submit(
                 self.recv_prompts, run_id, -1, 1
             )
-            messages = completions["entries"][0]["payload"]["messages"]
-            request_id = completions["entries"][0]["request_id"]
+            messages = completions[0]["payload"]["messages"]
+            request_id = completions[0]["request_id"]
             if self.mode == "batched":
                 chat_response = self.openai_client.chat.completions.create(
                     model="meta-llama/Meta-Llama-3-8B-Instruct",
@@ -166,6 +166,8 @@ class Client:
         _, _ = wait(futures, return_when=ALL_COMPLETED)
 
         reply = requests.get(f"{self.url}/run/lt/{run_id}/summary", headers=self.header)
+        print(json.dumps(reply.json()))
+        reply = requests.get(f"{self.url}/run/lt/leaderboard", headers=self.header)
         print(json.dumps(reply.json()))
 
 
