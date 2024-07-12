@@ -1,5 +1,7 @@
 from typing import Optional
 from openai import BaseModel
+import uuid
+
 from .run import LimitedTimeRun
 from .workload.workload import Workload
 
@@ -18,8 +20,9 @@ class LimitedTimeCompetition:
         self.user2run: dict[str, set[str]] = {}
         self.runs: dict[str, LimitedTimeRun] = {}
 
-    def create_run(self, username: str, run_id: str, rule: str) -> LimitedTimeRun:
-        run = LimitedTimeRun(username, rule, self.workload)
+    def create_run(self, username: str, rule: str) -> LimitedTimeRun:
+        run_id = rule + str(uuid.uuid4())
+        run = LimitedTimeRun(run_id, username, rule, self.workload)
         if username not in self.user2run:
             self.user2run[username] = set()
         self.user2run[username].add(run_id)

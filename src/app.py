@@ -74,9 +74,8 @@ def authenticate(token: str = Depends(oauth2_scheme)) -> str:
 
 @app.post("/run/lt")
 async def create_run(request: CreateRunRequest, user=Depends(authenticate)):
-    run_id = str(uuid.uuid4())
-    competition.create_run(user, run_id, request.rule)
-    return {"run_id": run_id}
+    run = competition.create_run(user, request.rule)
+    return {"run_id": run.run_id}
 
 
 @app.get("/run/lt/{run_id}/fetch", response_model=list[RequestEntry])

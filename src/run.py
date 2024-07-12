@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 import time
 from typing import Optional
 import datetime
-
+import pickle
 from attr import define
 import tiktoken
 from openai import BaseModel
@@ -90,7 +90,8 @@ def count_llama3_token(text: str) -> int:
 
 
 class BasicRun(ABC):
-    def __init__(self, username: str, workload: Workload):
+    def __init__(self, run_id: str, username: str, workload: Workload):
+        self.run_id = run_id
         self.username = username
         self.workload = workload
         self.responses = BufferedResponses()
@@ -164,6 +165,10 @@ class BasicRun(ABC):
             trace.append(satisfied_num)
         return trace
 
+    def dump(self):
+        with open(f"./tmp/{self.run_id}.pickle", "wb") as f:
+            pickle.dump(self, f)
+
 
 class LimitedTimeRun(BasicRun):
     """
@@ -171,9 +176,9 @@ class LimitedTimeRun(BasicRun):
     """
 
     def __init__(
-        self, username: str, rule: str, workload: Workload, time_limit: int = 60
+        self, run_id: str, username: str, rule: str, workload: Workload, time_limit: int = 60
     ):
-        super().__init__(username, workload)
+        super().__init__(run_id, username, workload)
         self.rule = rule
         self.time_limit = time_limit
 
@@ -186,6 +191,8 @@ class LimitedTimeRun(BasicRun):
             last_post_time = self.responses.content[-1].time_last_added
         else:
             last_post_time = None
+        
+        self.dump()
 
         return Summary(
             rule=self.rule,
