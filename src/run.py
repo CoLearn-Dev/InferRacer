@@ -3,7 +3,6 @@ import time
 from typing import Optional
 import datetime
 import pickle
-from attr import define
 import tiktoken
 from openai import BaseModel
 from transformers import AutoTokenizer
@@ -79,6 +78,7 @@ class Summary(BaseModel):
     sample_requests_first_3: list[tuple[ChatCompletion, BufferedString]]
     sample_requests_last_3: list[tuple[ChatCompletion, BufferedString]]
     trace_num_token: list[int]
+    better_trace: dict[int, int]
 
 
 def count_openai_token(text: str) -> int:
@@ -99,6 +99,7 @@ class BasicRun(ABC):
         self.num_post_total = 0  # meaningless when using streaming?
         self.workload_index = 0
         self.time_started = datetime.datetime.utcnow()
+        self.trace: dict[int, int] = {}
 
     @abstractmethod
     def check_limitation(self) -> bool:
@@ -130,6 +131,13 @@ class BasicRun(ABC):
 
         self.num_post_total += 1
         now = datetime.datetime.utcnow()
+        delta = now - self.time_started
+        delta_int = int(delta.total_seconds())
+        num_tokens = sum(count_openai_token(entry.payload) for entry in responses)
+        if delta_int not in self.trace:
+            self.trace[delta_int] = num_tokens
+        else:
+            self.trace[delta_int] += num_tokens
         for entry in responses:
             self.responses.insert(
                 entry.request_id, entry.offset, entry.payload, now, entry.finished
@@ -176,7 +184,12 @@ class LimitedTimeRun(BasicRun):
     """
 
     def __init__(
-        self, run_id: str, username: str, rule: str, workload: Workload, time_limit: int = 60
+        self,
+        run_id: str,
+        username: str,
+        rule: str,
+        workload: Workload,
+        time_limit: int = 300,
     ):
         super().__init__(run_id, username, workload)
         self.rule = rule
@@ -191,7 +204,7 @@ class LimitedTimeRun(BasicRun):
             last_post_time = self.responses.content[-1].time_last_added
         else:
             last_post_time = None
-        
+
         self.dump()
 
         return Summary(
@@ -214,4 +227,5 @@ class LimitedTimeRun(BasicRun):
                 zip(self.workload.completions[-3:], self.responses.content[-3:])
             ),
             trace_num_token=self.calculate_trace(self.time_limit),
+            better_trace=self.trace,
         )
