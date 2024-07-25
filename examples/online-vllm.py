@@ -154,6 +154,12 @@ class Client:
             else:
                 self.resolve_responses_streamed(run_id, request_id, messages)
 
+    def sumup(self, run_id: str):
+        reply = requests.get(f"{self.url}/run/lt/{run_id}/summary", headers=self.header)
+        print(json.dumps(reply.json()))
+        reply = requests.get(f"{self.url}/run/lt/leaderboard", headers=self.header)
+        print(json.dumps(reply.json()))
+
     def speedtest(self):
         reply = requests.post(
             f"{self.url}/run/lt",
@@ -162,15 +168,16 @@ class Client:
         )
         run_id = reply.json()["run_id"]
         futures = []
-        for _ in range(self.batchsize):
-            futures.append(self.vllm_executor.submit(self.isolated_speedtest, run_id))
+        try:
+            for _ in range(self.batchsize):
+                futures.append(
+                    self.vllm_executor.submit(self.isolated_speedtest, run_id)
+                )
 
-        _, _ = wait(futures, return_when=ALL_COMPLETED)
-
-        reply = requests.get(f"{self.url}/run/lt/{run_id}/summary", headers=self.header)
-        print(json.dumps(reply.json()))
-        reply = requests.get(f"{self.url}/run/lt/leaderboard", headers=self.header)
-        print(json.dumps(reply.json()))
+            _, _ = wait(futures, return_when=ALL_COMPLETED)
+            self.sumup(run_id)
+        except KeyboardInterrupt:
+            self.sumup(run_id)
 
 
 if __name__ == "__main__":

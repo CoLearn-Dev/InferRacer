@@ -159,6 +159,12 @@ class Client:
         )
         return reply.status_code == 200
 
+    def sumup(self, run_id: str):
+        reply = requests.get(f"{self.url}/run/lt/{run_id}/summary", headers=self.header)
+        print(json.dumps(reply.json()))
+        reply = requests.get(f"{self.url}/run/lt/leaderboard", headers=self.header)
+        print(json.dumps(reply.json()))
+
     def speedtest(self):
         reply = requests.post(
             f"{self.url}/run/lt",
@@ -171,51 +177,50 @@ class Client:
         )
         p.start()
 
-        prefetch_future = self.network_executor.submit(
-            self.recv_prompts,
-            run_id,
-            -1,
-            1,
-        )
-        current = 0
-        while True:
-            if current >= self.batchsize:
-                value = self.queue.get()
-                if value == "stop":
-                    break
-            else:
-                current += 1
-            completions = prefetch_future.result()
-            if completions is None:
-                break
+        try:
             prefetch_future = self.network_executor.submit(
-                self.recv_prompts, run_id, -1, 1
+                self.recv_prompts,
+                run_id,
+                -1,
+                1,
             )
-            messages = completions[0]["payload"]["messages"]
-            request_id = completions[0]["request_id"]
-            formatted_tokens = tokenizer.apply_chat_template(
-                messages,
-                add_generation_prompt=True,
-            )
-            metadata = {
-                "task_id": str(request_id) + "@" + str(uuid.uuid4()),
-                "step": 0,
-                "round": 0,
-                "plan": plan_template,
-                "payload": [formatted_tokens],
-                "task_manager_url": "http://localhost:29980",
-                "max_total_len": 2048,
-            }
-            response = requests.post(
-                "http://localhost:8080/forward", data=dumps({}, metadata)
-            )
-
-        reply = requests.get(f"{self.url}/run/lt/{run_id}/summary", headers=self.header)
-        print(json.dumps(reply.json()))
-        reply = requests.get(f"{self.url}/run/lt/leaderboard", headers=self.header)
-        print(json.dumps(reply.json()))
-
-        p.kill()
+            current = 0
+            while True:
+                if current >= self.batchsize:
+                    value = self.queue.get()
+                    if value == "stop":
+                        break
+                else:
+                    current += 1
+                completions = prefetch_future.result()
+                if completions is None:
+                    break
+                prefetch_future = self.network_executor.submit(
+                    self.recv_prompts, run_id, -1, 1
+                )
+                messages = completions[0]["payload"]["messages"]
+                request_id = completions[0]["request_id"]
+                formatted_tokens = tokenizer.apply_chat_template(
+                    messages,
+                    add_generation_prompt=True,
+                )
+                metadata = {
+                    "task_id": str(request_id) + "@" + str(uuid.uuid4()),
+                    "step": 0,
+                    "round": 0,
+                    "plan": plan_template,
+                    "payload": [formatted_tokens],
+                    "task_manager_url": "http://localhost:29980",
+                    "max_total_len": 2048,
+                }
+                response = requests.post(
+                    "http://localhost:8080/forward", data=dumps({}, metadata)
+                )
+            self.sumup(run_id)
+            p.kill()
+        except KeyboardInterrupt:
+            self.sumup(run_id)
+            p.kill()
 
 
 if __name__ == "__main__":

@@ -46,6 +46,12 @@ class Client:
         )
         return reply.status_code == 200
 
+    def sumup(self, run_id: str):
+        reply = requests.get(f"{self.url}/run/lt/{run_id}/summary", headers=self.header)
+        print(json.dumps(reply.json()))
+        reply = requests.get(f"{self.url}/run/lt/leaderboard", headers=self.header)
+        print(json.dumps(reply.json()))
+
     def speedtest(self, llm: LLM):
         tokenizer = AutoTokenizer.from_pretrained(
             "meta-llama/Meta-Llama-3-70B-Instruct"
@@ -57,45 +63,44 @@ class Client:
         )
         run_id = reply.json()["run_id"]
 
-        index = 0
-        prefetch_future = self.executor.submit(
-            self.recv_prompts, run_id, 0, self.batchsize
-        )
-        while True:
-            completions = prefetch_future.result()
-            if completions is None:
-                break
+        try:
+            index = 0
             prefetch_future = self.executor.submit(
-                self.recv_prompts, run_id, index + self.batchsize, self.batchsize
+                self.recv_prompts, run_id, 0, self.batchsize
             )
-            prompts = []
-            for completion in completions:
-                formatted_prompt = tokenizer.apply_chat_template(
-                    completion["payload"]["messages"],
-                    tokenize=False,
-                    add_generation_prompt=True,
+            while True:
+                completions = prefetch_future.result()
+                if completions is None:
+                    break
+                prefetch_future = self.executor.submit(
+                    self.recv_prompts, run_id, index + self.batchsize, self.batchsize
                 )
-                prompts.append(formatted_prompt)
-            future = self.executor.submit(llm.generate, prompts)
-            outputs = future.result()
-            results = [output.outputs[0].text for output in outputs]
-            entries = []
-            for result in results:
-                entries.append(
-                    {
-                        "request_id": index,
-                        "offset": 0,
-                        "payload": result,
-                        "finished": False,
-                    }
-                )
-                index += 1
-            self.executor.submit(self.send_responses, run_id, entries)
-
-        reply = requests.get(f"{self.url}/run/lt/{run_id}/summary", headers=self.header)
-        print(json.dumps(reply.json()))
-        reply = requests.get(f"{self.url}/run/lt/leaderboard", headers=self.header)
-        print(json.dumps(reply.json()))
+                prompts = []
+                for completion in completions:
+                    formatted_prompt = tokenizer.apply_chat_template(
+                        completion["payload"]["messages"],
+                        tokenize=False,
+                        add_generation_prompt=True,
+                    )
+                    prompts.append(formatted_prompt)
+                future = self.executor.submit(llm.generate, prompts)
+                outputs = future.result()
+                results = [output.outputs[0].text for output in outputs]
+                entries = []
+                for result in results:
+                    entries.append(
+                        {
+                            "request_id": index,
+                            "offset": 0,
+                            "payload": result,
+                            "finished": False,
+                        }
+                    )
+                    index += 1
+                self.executor.submit(self.send_responses, run_id, entries)
+            self.sumup(run_id)
+        except KeyboardInterrupt:
+            self.sumup(run_id)
 
 
 if __name__ == "__main__":
