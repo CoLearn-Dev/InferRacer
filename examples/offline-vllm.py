@@ -13,7 +13,7 @@ class Client:
         self.password = password
         self.url = url
         self.batchsize = batchsize
-        self.executor = ThreadPoolExecutor(max_workers=16)
+        self.executor = ThreadPoolExecutor(max_workers=128)
 
         requests.post(
             f"{url}/user/signin",
@@ -47,11 +47,13 @@ class Client:
         return reply.status_code == 200
 
     def speedtest(self, llm: LLM):
-        tokenizer = AutoTokenizer.from_pretrained("meta-llama/Meta-Llama-3-8B-Instruct")
+        tokenizer = AutoTokenizer.from_pretrained(
+            "meta-llama/Meta-Llama-3-70B-Instruct"
+        )
         reply = requests.post(
             f"{self.url}/run/lt",
             headers=self.header,
-            json={"rule": "60s", "model": "llama"},
+            json={"time_limit": 60, "shuffled": False, "model": "llama"},
         )
         run_id = reply.json()["run_id"]
 
@@ -102,6 +104,6 @@ if __name__ == "__main__":
     if username is None or password is None:
         print("Please set USERNAME and PASSWORD environment variables")
         exit(1)
-    cli = Client(username, password, "http://localhost:28000", 128)
-    llm = LLM("meta-llama/Meta-Llama-3-8B-Instruct")
+    cli = Client(username, password, "http://localhost:28000", 64)
+    llm = LLM("meta-llama/Meta-Llama-3-70B-Instruct", tensor_parallel_size=2)
     cli.speedtest(llm)

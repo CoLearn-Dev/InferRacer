@@ -6,12 +6,15 @@ import json
 import os
 from concurrent.futures import ALL_COMPLETED, ThreadPoolExecutor, wait
 from openai import OpenAI
+from transformers import AutoTokenizer
 import time
 import asyncio
 
 # Set OpenAI's API key and API base to use vLLM's API server.
 openai_api_key = "EMPTY"
 openai_api_base = "http://localhost:8000/v1"
+
+tokenizer = AutoTokenizer.from_pretrained("meta-llama/Meta-Llama-3-8B-Instruct")
 
 
 class Client:
@@ -27,8 +30,8 @@ class Client:
         self.password = password
         self.url = url
         self.batchsize = batchsize
-        self.vllm_executor = ThreadPoolExecutor(max_workers=16)
-        self.network_executor = ThreadPoolExecutor(max_workers=16)
+        self.vllm_executor = ThreadPoolExecutor(max_workers=128)
+        self.network_executor = ThreadPoolExecutor(max_workers=128)
         self.openai_client = OpenAI(
             api_key=openai_api_key,
             base_url=openai_api_base,
@@ -66,7 +69,7 @@ class Client:
 
     def gen_chat_responses(self, request_id: int, messages: list):
         chat_stream = self.openai_client.chat.completions.create(
-            model="meta-llama/Meta-Llama-3-8B-Instruct",
+            model="meta-llama/Meta-Llama-3-70B-Instruct",
             messages=messages,
             stream=True,
         )
@@ -99,7 +102,7 @@ class Client:
 
     def relay_responses(self, run_id: int, request_id: int, messages: list):
         chat_stream = self.openai_client.chat.completions.create(
-            model="meta-llama/Meta-Llama-3-8B-Instruct",
+            model="meta-llama/Meta-Llama-3-70B-Instruct",
             messages=messages,
             stream=True,
         )
@@ -133,11 +136,10 @@ class Client:
             prefetch_future = self.network_executor.submit(
                 self.recv_prompts, run_id, -1, 1
             )
-            messages = completions[0]["payload"]["messages"]
             request_id = completions[0]["request_id"]
             if self.mode == "batched":
                 chat_response = self.openai_client.chat.completions.create(
-                    model="meta-llama/Meta-Llama-3-8B-Instruct",
+                    model="meta-llama/Meta-Llama-3-70B-Instruct",
                     messages=messages,
                 )
                 entries = [
@@ -156,7 +158,7 @@ class Client:
         reply = requests.post(
             f"{self.url}/run/lt",
             headers=self.header,
-            json={"rule": "60s", "model": "llama"},
+            json={"time_limit": 60, "shuffled": False, "model": "llama"},
         )
         run_id = reply.json()["run_id"]
         futures = []

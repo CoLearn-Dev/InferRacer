@@ -163,7 +163,7 @@ class Client:
         reply = requests.post(
             f"{self.url}/run/lt",
             headers=self.header,
-            json={"rule": "60s", "model": "llama"},
+            json={"time_limit": 60, "shuffled": False, "model": "llama"},
         )
         run_id = reply.json()["run_id"]
         p = multiprocessing.Process(
@@ -204,6 +204,7 @@ class Client:
                 "plan": plan_template,
                 "payload": [formatted_tokens],
                 "task_manager_url": "http://localhost:29980",
+                "max_total_len": 2048,
             }
             response = requests.post(
                 "http://localhost:8080/forward", data=dumps({}, metadata)
@@ -223,5 +224,5 @@ if __name__ == "__main__":
     if username is None or password is None:
         print("Please set USERNAME and PASSWORD environment variables")
         exit(1)
-    cli = Client(username, password, "http://localhost:28000", 88)
+    cli = Client(username, password, "http://localhost:28000", 66)
     cli.speedtest()

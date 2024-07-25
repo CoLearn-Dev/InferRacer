@@ -65,10 +65,11 @@ class ResponseEntry(BaseModel):
 
 
 class Summary(BaseModel):
-    rule: str
+    run_id: str
     username: str
-    num_token_total_llama3: int
-    num_token_total_openai: int
+    time_used: float
+    num_token_total_llama3_avg: float
+    num_token_total_openai_avg: float
     num_get_total: int
     num_post_total: int
     num_task_finished: int
@@ -99,11 +100,18 @@ class BasicRun(ABC):
         self.num_post_total = 0  # meaningless when using streaming?
         self.workload_index = 0
         self.time_started = datetime.datetime.utcnow()
+        self.time_last_added: Optional[datetime.datetime] = None
         self.trace: dict[int, int] = {}
 
     @abstractmethod
     def check_limitation(self) -> bool:
         pass
+
+    def get_time_used(self) -> Optional[float]:
+        if self.time_last_added is None:
+            return None
+        else:
+            return (self.time_last_added - self.time_started).total_seconds()
 
     def get_workload(self, offset: int, limit: int) -> Optional[list[RequestEntry]]:
         if not self.check_limitation():
@@ -131,6 +139,7 @@ class BasicRun(ABC):
 
         self.num_post_total += 1
         now = datetime.datetime.utcnow()
+        self.time_last_added = now
         delta = now - self.time_started
         delta_int = int(delta.total_seconds())
         num_tokens = sum(count_openai_token(entry.payload) for entry in responses)
@@ -187,39 +196,44 @@ class LimitedTimeRun(BasicRun):
         self,
         run_id: str,
         username: str,
-        rule: str,
         workload: Workload,
-        time_limit: int = 300,
+        time_limit: int,
     ):
         super().__init__(run_id, username, workload)
-        self.rule = rule
+        self.sumuped = False
         self.time_limit = time_limit
 
     def check_limitation(self) -> bool:
         now = datetime.datetime.utcnow()
-        return now - self.time_started <= datetime.timedelta(seconds=self.time_limit)
+        return (not self.sumuped) and (
+            now - self.time_started <= datetime.timedelta(seconds=self.time_limit)
+        )
 
     def sumup(self) -> Summary:
-        if len(self.responses.content) > 0:
-            last_post_time = self.responses.content[-1].time_last_added
-        else:
-            last_post_time = None
-
-        self.dump()
+        if not self.sumuped:
+            self.dump()
+            self.sumuped = True
+        
+        time_used = self.get_time_used()
+        if time_used is None:
+            time_used = float(self.time_limit)
 
         return Summary(
-            rule=self.rule,
+            run_id=self.run_id,
             username=self.username,
-            num_token_total_llama3=sum(
+            time_used=time_used,
+            num_token_total_llama3_avg=sum(
                 count_llama3_token(entry.buffer) for entry in self.responses.content
-            ),
-            num_token_total_openai=self.count_total_openai_tokens(),
+            )
+            / self.time_limit,
+            num_token_total_openai_avg=self.count_total_openai_tokens()
+            / self.time_limit,
             num_get_total=self.num_get_total,
             num_post_total=self.num_post_total,
             num_task_finished=self.num_post_total,
             num_task_touched=self.num_get_total,
             first_get_time=self.time_started,
-            last_post_time=last_post_time,
+            last_post_time=self.time_last_added,
             sample_requests_first_3=list(
                 zip(self.workload.completions[:3], self.responses.content[:3])
             ),

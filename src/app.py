@@ -21,8 +21,16 @@ competition = LimitedTimeCompetition(Oasst1Dataset().into_workload())
 
 
 class CreateRunRequest(BaseModel):
-    rule: str
+    time_limit: Optional[int]
+    """
+    Run time limit in seconds
+    """
+
+    shuffled: bool
+    """Just a placeholder for now"""
+
     model: str
+    """Currently we don't have a way to verify the model"""
 
 
 class SubmitResultsRequest(BaseModel):
@@ -74,7 +82,7 @@ def authenticate(token: str = Depends(oauth2_scheme)) -> str:
 
 @app.post("/run/lt")
 async def create_run(request: CreateRunRequest, user=Depends(authenticate)):
-    run = competition.create_run(user, request.rule)
+    run = competition.create_run(user, request.time_limit, request.shuffled)
     return {"run_id": run.run_id}
 
 
