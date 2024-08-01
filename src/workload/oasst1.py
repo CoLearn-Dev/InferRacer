@@ -1,8 +1,9 @@
 from typing import Optional
+
 from datasets import load_dataset
 
 from .utils import cache
-from .workload import ChatMessage, Workload, ChatCompletion
+from .workload import ChatCompletion, ChatMessage, Workload
 
 
 class OasstNode:
@@ -13,12 +14,12 @@ class OasstNode:
     def add_child(self, node: "OasstNode"):
         self.children.append(node)
 
-    def traverse_for_workload(self, messages: list[ChatMessage], workload: Workload):
-        messages.append(self.message)
-        completion = ChatCompletion(messages=messages)
-        workload.completions.append(completion)
+    def traverse_for_workload(self, workload: Workload):
+        if self.message.role == "prompter":
+            completion = ChatCompletion(messages=[self.message])
+            workload.completions.append(completion)
         for child in self.children:
-            child.traverse_for_workload(messages.copy(), workload)
+            child.traverse_for_workload(workload)
 
 
 class OasstTree:
@@ -50,7 +51,7 @@ class Oasst1Dataset:
 
         workload = Workload(completions=[])
         for root in tree.roots:
-            root.traverse_for_workload([], workload)
+            root.traverse_for_workload(workload)
         return workload
 
 
