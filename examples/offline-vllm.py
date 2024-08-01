@@ -1,10 +1,12 @@
-from typing import Optional
-from vllm import LLM
-import requests
+import argparse
 import json
-from transformers import AutoTokenizer
 import os
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Optional
+
+import requests
+from transformers import AutoTokenizer  # type: ignore
+from vllm import LLM, SamplingParams
 
 
 class Client:
@@ -28,7 +30,7 @@ class Client:
 
     def recv_prompts(
         self, run_id: int, offset: int, limit: int
-    ) -> Optional[list[dict]]:
+    ) -> Optional[list[dict[Any, Any]]]:
         reply = requests.get(
             f"{self.url}/run/lt/{run_id}/fetch",
             headers=self.header,
@@ -38,7 +40,7 @@ class Client:
             return None
         return reply.json()
 
-    def send_responses(self, run_id: int, entries: list[dict]) -> bool:
+    def send_responses(self, run_id: int, entries: list[dict[Any, Any]]) -> bool:
         reply = requests.post(
             f"{self.url}/run/lt/{run_id}/submit",
             headers=self.header,
@@ -46,20 +48,20 @@ class Client:
         )
         return reply.status_code == 200
 
-    def sumup(self, run_id: str):
+    def sumup(self, run_id: str) -> None:
         reply = requests.get(f"{self.url}/run/lt/{run_id}/summary", headers=self.header)
         print(json.dumps(reply.json()))
         reply = requests.get(f"{self.url}/run/lt/leaderboard", headers=self.header)
         print(json.dumps(reply.json()))
 
-    def speedtest(self, llm: LLM):
+    def speedtest(self, llm: LLM, time_limit: int, max_tokens: int) -> None:
         tokenizer = AutoTokenizer.from_pretrained(
             "meta-llama/Meta-Llama-3-70B-Instruct"
         )
         reply = requests.post(
             f"{self.url}/run/lt",
             headers=self.header,
-            json={"time_limit": 60, "shuffled": False, "model": "llama"},
+            json={"time_limit": time_limit, "shuffled": False, "model": "llama"},
         )
         run_id = reply.json()["run_id"]
 
@@ -83,7 +85,8 @@ class Client:
                         add_generation_prompt=True,
                     )
                     prompts.append(formatted_prompt)
-                future = self.executor.submit(llm.generate, prompts)
+                samparam = SamplingParams(max_tokens=max_tokens)
+                future = self.executor.submit(llm.generate, prompts, samparam)
                 outputs = future.result()
                 results = [output.outputs[0].text for output in outputs]
                 entries = []
@@ -104,11 +107,27 @@ class Client:
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--model-name", type=str, default="meta-llama/Meta-Llama-3-70B-Instruct"
+    )
+    parser.add_argument("--time-limit", type=int, default=60)
+    parser.add_argument("--batch-size", type=int, default=128)
+    parser.add_argument("--max-tokens", type=int, default=1024)
+    parser.add_argument("--tensor-parallel-size", type=int, default=1)
+    parser.add_argument("--pipeline-parallel-size", type=int, default=1)
+    args = parser.parse_args()
+
     username = os.environ.get("USERNAME")
     password = os.environ.get("PASSWORD")
     if username is None or password is None:
         print("Please set USERNAME and PASSWORD environment variables")
         exit(1)
-    cli = Client(username, password, "http://localhost:28000", 64)
-    llm = LLM("meta-llama/Meta-Llama-3-70B-Instruct", tensor_parallel_size=2)
-    cli.speedtest(llm)
+    cli = Client(username, password, "http://localhost:28000", args.batch_size)
+    llm = LLM(
+        model=args.model_name,
+        tensor_parallel_size=args.tensor_parallel_size,
+        pipeline_parallel_size=args.pipeline_parallel_size,
+        gpu_memory_utilization=0.95,
+    )
+    cli.speedtest(llm, args.time_limit, args.max_tokens)

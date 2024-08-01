@@ -1,6 +1,7 @@
-from typing import Optional
-from openai import BaseModel
 import uuid
+from typing import Optional
+
+from openai import BaseModel
 
 from .run import LimitedTimeRun
 from .workload.workload import Workload

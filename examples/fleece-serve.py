@@ -1,14 +1,16 @@
-from typing import Optional
-import requests
+import argparse
 import json
-import os
-from concurrent.futures import ThreadPoolExecutor
-from flask import Flask, request
-from transformers import AutoTokenizer
-import mysql.connector
-from fleece_network.sede import dumps
 import multiprocessing
+import os
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Optional
+
+import mysql.connector
+import requests
+from flask import Flask, request
+from fleece_network.sede import dumps
+from transformers import AutoTokenizer  # type: ignore
 
 tokenizer = AutoTokenizer.from_pretrained("meta-llama/Meta-Llama-3-8B-Instruct")
 stop_tokens = {128001, 128009}
@@ -19,7 +21,7 @@ log = logging.getLogger("werkzeug")
 log.setLevel(logging.ERROR)
 
 
-def get_worker_ids():
+def get_worker_ids() -> list[Any]:
     password = os.environ.get("DB_PASSWORD")
     if password is None:
         print("Please set DB_PASSWORD environment variable")
@@ -112,11 +114,11 @@ class Client:
         self.header = {"Authorization": f"Bearer {token}"}
         self.queue = multiprocessing.Queue()
 
-    def flask_service(self, events: multiprocessing.Queue, run_id: str):
+    def flask_service(self, events: multiprocessing.Queue, run_id: str) -> None:
         app = Flask(__name__)
 
         @app.route("/update_tasks", methods=["POST"])
-        def update_tasks():
+        def update_tasks() -> str:
             data = request.json
             entries = []
             for task in data:
@@ -133,7 +135,6 @@ class Client:
                 )
                 if token in stop_tokens:
                     events.put(request_id)
-            print(len(entries))
             if not self.send_responses(run_id, entries):
                 events.put("stop")
 
@@ -141,7 +142,9 @@ class Client:
 
         app.run(port=29980, debug=False)
 
-    def recv_prompts(self, run_id: str, offset: int, limit: int) -> Optional[dict]:
+    def recv_prompts(
+        self, run_id: str, offset: int, limit: int
+    ) -> Optional[dict[Any, Any]]:
         reply = requests.get(
             f"{self.url}/run/lt/{run_id}/fetch",
             headers=self.header,
@@ -151,7 +154,7 @@ class Client:
             return None
         return reply.json()
 
-    def send_responses(self, run_id: str, entries: list[dict]) -> bool:
+    def send_responses(self, run_id: str, entries: list[dict[Any, Any]]) -> bool:
         reply = requests.post(
             f"{self.url}/run/lt/{run_id}/submit",
             headers=self.header,
@@ -159,17 +162,17 @@ class Client:
         )
         return reply.status_code == 200
 
-    def sumup(self, run_id: str):
+    def sumup(self, run_id: str) -> None:
         reply = requests.get(f"{self.url}/run/lt/{run_id}/summary", headers=self.header)
         print(json.dumps(reply.json()))
         reply = requests.get(f"{self.url}/run/lt/leaderboard", headers=self.header)
         print(json.dumps(reply.json()))
 
-    def speedtest(self):
+    def speedtest(self, time_limit: int, max_tokens: int) -> None:
         reply = requests.post(
             f"{self.url}/run/lt",
             headers=self.header,
-            json={"time_limit": 60, "shuffled": False, "model": "llama"},
+            json={"time_limit": time_limit, "shuffled": False, "model": "llama"},
         )
         run_id = reply.json()["run_id"]
         p = multiprocessing.Process(
@@ -211,7 +214,7 @@ class Client:
                     "plan": plan_template,
                     "payload": [formatted_tokens],
                     "task_manager_url": "http://localhost:29980",
-                    "max_total_len": 2048,
+                    "max_total_len": max_tokens,
                 }
                 response = requests.post(
                     "http://localhost:8080/forward", data=dumps({}, metadata)
@@ -224,10 +227,16 @@ class Client:
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--time-limit", type=int, default=60)
+    parser.add_argument("--batch-size", type=int, default=128)
+    parser.add_argument("--max-tokens", type=int, default=1024)
+
+    args = parser.parse_args()
     username = os.environ.get("USERNAME")
     password = os.environ.get("PASSWORD")
     if username is None or password is None:
         print("Please set USERNAME and PASSWORD environment variables")
         exit(1)
-    cli = Client(username, password, "http://localhost:28000", 66)
-    cli.speedtest()
+    cli = Client(username, password, "http://localhost:28000", args.batch_size)
+    cli.speedtest(args.time_limit, args.max_tokens)

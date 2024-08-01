@@ -1,11 +1,12 @@
-from abc import ABC, abstractmethod
-import time
-from typing import Optional
 import datetime
 import pickle
+import time
+from abc import ABC, abstractmethod
+from typing import Optional
+
 import tiktoken
 from openai import BaseModel
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer  # type: ignore
 
 from .workload.workload import ChatCompletion, Workload
 
@@ -20,7 +21,7 @@ class BufferedString(BaseModel):
 
     def insert(
         self, offset: int, payload: str, time: datetime.datetime, finished: bool
-    ):
+    ) -> None:
         self.time_last_added = time
         self.finished = finished
         if offset == -1:
@@ -41,7 +42,7 @@ class BufferedResponses(BaseModel):
         payload: str,
         time: datetime.datetime,
         finished: bool,
-    ):
+    ) -> None:
         while index >= len(self.content):
             self.content.append(BufferedString())
         self.content[index].insert(offset, payload, time, finished)
@@ -154,10 +155,10 @@ class BasicRun(ABC):
 
         return True
 
-    def count_total_openai_tokens(self):
+    def count_total_openai_tokens(self) -> int:
         return sum(count_openai_token(entry.buffer) for entry in self.responses.content)
 
-    def calculate_trace(self, time_range: int):
+    def calculate_trace(self, time_range: int) -> list[int]:
         trace = []
         responses = list(
             map(
@@ -182,7 +183,7 @@ class BasicRun(ABC):
             trace.append(satisfied_num)
         return trace
 
-    def dump(self):
+    def dump(self) -> None:
         with open(f"./tmp/{self.run_id}.pickle", "wb") as f:
             pickle.dump(self, f)
 
@@ -213,7 +214,7 @@ class LimitedTimeRun(BasicRun):
         if not self.sumuped:
             self.dump()
             self.sumuped = True
-        
+
         time_used = self.get_time_used()
         if time_used is None:
             time_used = float(self.time_limit)

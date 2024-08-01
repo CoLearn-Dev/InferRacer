@@ -1,17 +1,17 @@
-from fastapi import Depends, FastAPI, HTTPException, status, Request
+import datetime
+import json
+import uuid
+from typing import Optional
+
+import jwt
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from typing import Optional
-import datetime
-import uuid
-import jwt
-import json
 from openai import BaseModel
 
 from .competition import LimitedTimeCompetition, RankingSlot
-
+from .run import LimitedTimeRun, RequestEntry, ResponseEntry, Summary
 from .workload.oasst1 import Oasst1Dataset
-from .run import RequestEntry, ResponseEntry, LimitedTimeRun, Summary
 
 app = FastAPI()
 key = "secret"
