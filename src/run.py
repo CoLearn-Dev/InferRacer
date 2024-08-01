@@ -71,6 +71,7 @@ class Summary(BaseModel):
     time_used: float
     num_token_total_llama3_avg: float
     num_token_total_openai_avg: float
+    num_token_peak: int
     num_get_total: int
     num_post_total: int
     num_task_finished: int
@@ -229,6 +230,7 @@ class LimitedTimeRun(BasicRun):
             / self.time_limit,
             num_token_total_openai_avg=self.count_total_openai_tokens()
             / self.time_limit,
+            num_token_peak=max(self.trace.values()),
             num_get_total=self.num_get_total,
             num_post_total=self.num_post_total,
             num_task_finished=self.num_post_total,
